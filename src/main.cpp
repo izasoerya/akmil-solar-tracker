@@ -150,19 +150,21 @@ void taskSampling()
 	lcd.setCursor(8, 1);
 	lcd.print("A:" + String(iPV, 2)); // Print current with 2 decimal places
 
+	//! URGENT THINK HOW TO SERVE THE DATA
 	// Line 3: Voltage and Current Batt
-	lcd.setCursor(0, 2);
-	lcd.print("V:" + String(vBatt, 2)); // Print voltage with 2 decimal places
-	lcd.setCursor(8, 2);
-	lcd.print("A:" + String(iBatt, 2)); // Print current with 2 decimal places
+	// lcd.setCursor(0, 2);
+	// lcd.print("V:" + String(vBatt, 2)); // Print voltage with 2 decimal places
+	// lcd.setCursor(8, 2);
+	// lcd.print("A:" + String(iBatt, 2)); // Print current with 2 decimal places
 }
 
 void taskLogging()
 {
 	// -------- Log to SD Card --------
 	dataString = String(millis()) + "," +
-				 String(lux1) + "," + String(lux2) +
-				 "," + String(vPV) + "," + String(iPV) + String(vBatt) + "," + String(iBatt);
+				 String(lux1) + "," + String(lux2) + "," +
+				 String(vPV) + "," + String(iPV) + "," +
+				 String(vBatt) + "," + String(iBatt);
 
 	dataFile = SD.open(FILENAME, FILE_WRITE);
 	if (dataFile)
