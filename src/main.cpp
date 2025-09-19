@@ -13,14 +13,14 @@ void taskLogging();
 
 // 2. DEFINE PINS AND ADDRESSES
 const byte SD_CS_PIN = 10;
-const byte ACS712_BAT_PIN = A0;
-const byte ACS712_PV_PIN = A0;
-const byte VOLTAGE_BAT_PIN = A1;
+const byte ACS712_BAT_PIN = A7;
+const byte ACS712_PV_PIN = A6;
+const byte VOLTAGE_BAT_PIN = A0;
 const byte VOLTAGE_PV_PIN = A1;
 const byte BH1750_ADDR1 = 0x23; // ADDR pin to GND
 const byte BH1750_ADDR2 = 0x5C; // ADDR pin to VCC
 const byte LCD_ADDR = 0x27;		// Common LCD address (or 0x3F)
-const byte SERVO_PIN = 2;
+const byte SERVO_PIN = 6;
 const uint16_t delaySamplingData = 200;
 const uint16_t delayControlSystem = 250;
 const uint16_t delayWriteToSD = 5000;
