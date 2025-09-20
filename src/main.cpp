@@ -5,8 +5,8 @@
 #include <BH1750.h>			   // For BH1750 light sensors
 #include <LiquidCrystal_I2C.h> // For I2C LCD
 #include "Control_System.h"	   // For Controlling Servo
-#include "Scheduler.h"
 
+// Forward declarations of task functions
 void taskSampling();
 void taskControl();
 void taskLogging();
@@ -21,30 +21,33 @@ const byte BH1750_ADDR1 = 0x23; // ADDR pin to GND
 const byte BH1750_ADDR2 = 0x5C; // ADDR pin to VCC
 const byte LCD_ADDR = 0x27;		// Common LCD address (or 0x3F)
 const byte SERVO_PIN = 6;
-const uint16_t delaySamplingData = 200;
-const uint16_t delayControlSystem = 250;
-const uint16_t delayWriteToSD = 5000;
 
 // 3. CONFIGURE SENSORS & OBJECTS
 const float R1 = 30000.0;					 // Resistor from input voltage to analog pin
 const float R2 = 7500.0;					 // Resistor from analog pin to ground
 const float VOLTAGE_CORRECTION_FACTOR = 1.0; // Optional calibration
-const float ACS_SENSITIVITY = 0.185;		 // Volts per Amp (185mV/A)
+const float ACS_SENSITIVITY = 0.185;		 // Volts per Amp (185mV/A) for 5A module
 const int ACS_ZERO_OFFSET = 512;			 // Theoretical zero-current ADC reading (1023/2)
 
 // Create objects for our hardware
 BH1750 lightMeter1(BH1750_ADDR1);
 BH1750 lightMeter2(BH1750_ADDR2);
-LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
+LiquidCrystal_I2C lcd(LCD_ADDR, 20, 4); // Configured for a 20x4 display
 ControlSystem control;
 File dataFile;
-String dataString = ""; // String to hold data for SD card logging
 const char *FILENAME = "datalog.csv";
-uint32_t prevMillis = 0;
+
+// Global variables for sensor readings
 float lux1, lux2, vBatt, iBatt, vPV, iPV;
-Scheduler scheduleSampling(200, taskSampling); // 200 milisecond sampling
-Scheduler scheduleLogging(3000, taskLogging);  // 3000 milisecond logging
-Scheduler scheduleControl(250, taskControl);   // 250 milisecond controlling
+
+// --- millis() Based Task Scheduling ---
+unsigned long previousMillisSampling = 0;
+unsigned long previousMillisControl = 0;
+unsigned long previousMillisLogging = 0;
+
+const long intervalSampling = 200; // Sample data every 200 ms
+const long intervalControl = 250;  // Run control logic every 250 ms
+const long intervalLogging = 3000; // Log data to SD card every 3 seconds
 
 // 4. SETUP FUNCTION - Runs once at the beginning
 void setup()
@@ -61,7 +64,7 @@ void setup()
 
 	// Initialize I2C bus
 	Wire.begin();
-	Wire.setTimeout(3000); // 3 sec timeout
+	Wire.setTimeout(500); // 3 sec timeout
 
 	// Initialize BH1750 sensors
 	while (!lightMeter1.begin(BH1750::CONTINUOUS_HIGH_RES_MODE))
@@ -116,68 +119,98 @@ void setup()
 
 	lcd.clear();
 	lcd.print("Setup Complete");
+	Serial.println("Setup Complete");
 	delay(1000);
 }
 
 void taskSampling()
 {
-	// -------- Read Sensor Values --------
+	// -------- Read All Sensor Values --------
 	lux1 = lightMeter1.readLightLevel();
 	lux2 = lightMeter2.readLightLevel();
+	lcd.clear();
 
 	float vOutBatt = (analogRead(VOLTAGE_BAT_PIN) * 5.0) / 1023.0;
 	vBatt = vOutBatt * (R1 + R2) / R2 * VOLTAGE_CORRECTION_FACTOR;
+
 	float vOutPV = (analogRead(VOLTAGE_PV_PIN) * 5.0) / 1023.0;
 	vPV = vOutPV * (R1 + R2) / R2 * VOLTAGE_CORRECTION_FACTOR;
 
 	float currentVoltageBatt = (analogRead(ACS712_BAT_PIN) - ACS_ZERO_OFFSET) * (5.0 / 1023.0);
 	iBatt = currentVoltageBatt / ACS_SENSITIVITY;
+
 	float currentVoltagePV = (analogRead(ACS712_PV_PIN) - ACS_ZERO_OFFSET) * (5.0 / 1023.0);
 	iPV = currentVoltagePV / ACS_SENSITIVITY;
 
-	// -------- Display on LCD --------
-	lcd.clear();
+	// -------- Display on LCD (NO FLICKER METHOD) --------
+	// char buffer[128]; // Buffer to hold formatted string for one line (20 chars + null)
 
-	// Line 1: Lux values
+	// Line 1: PV Data
 	lcd.setCursor(0, 0);
-	lcd.print("L1:" + String(lux1, 0)); // Print lux1 with 0 decimal places
-	lcd.setCursor(8, 0);
-	lcd.print("L2:" + String(lux2, 0)); // Print lux2 with 0 decimal places
+	lcd.print("P :");
+	lcd.print(vPV, 1);
+	lcd.print("V ");
+	lcd.print(iPV, 2);
+	lcd.print("A");
 
-	// Line 2: Voltage and Current PV
+	// Line 2: Battery Data
 	lcd.setCursor(0, 1);
-	lcd.print("V:" + String(vPV, 2)); // Print voltage with 2 decimal places
-	lcd.setCursor(8, 1);
-	lcd.print("A:" + String(iPV, 2)); // Print current with 2 decimal places
+	lcd.print("B:");
+	lcd.print(vBatt, 1);
+	lcd.print("V ");
+	lcd.print(iBatt, 2);
+	lcd.print("A");
 
-	//! URGENT THINK HOW TO SERVE THE DATA
-	// Line 3: Voltage and Current Batt
-	// lcd.setCursor(0, 2);
-	// lcd.print("V:" + String(vBatt, 2)); // Print voltage with 2 decimal places
-	// lcd.setCursor(8, 2);
-	// lcd.print("A:" + String(iBatt, 2)); // Print current with 2 decimal places
+	// Line 3: Lux Data
+	lcd.setCursor(0, 2);
+	lcd.print("L1:");
+	lcd.print(lux1, 0);
+	lcd.print(" L2:");
+	lcd.print(lux2, 0);
 }
 
 void taskLogging()
 {
-	// -------- Log to SD Card --------
-	dataString = String(millis()) + "," +
-				 String(lux1) + "," + String(lux2) + "," +
-				 String(vPV) + "," + String(iPV) + "," +
-				 String(vBatt) + "," + String(iBatt);
-
+	// Open file, write directly, and close
 	dataFile = SD.open(FILENAME, FILE_WRITE);
 	if (dataFile)
 	{
-		dataFile.println(dataString);
+		// Write data directly to file without creating String objects
+		dataFile.print(millis());
+		dataFile.print(",");
+		dataFile.print(lux1);
+		dataFile.print(",");
+		dataFile.print(lux2);
+		dataFile.print(",");
+		dataFile.print(vPV);
+		dataFile.print(",");
+		dataFile.print(iPV);
+		dataFile.print(",");
+		dataFile.print(vBatt);
+		dataFile.print(",");
+		dataFile.println(iBatt);
 		dataFile.close();
-		Serial.println(dataString);
+
+		// Also print to serial for debugging
+		Serial.print(millis());
+		Serial.print(",");
+		Serial.print(lux1);
+		Serial.print(",");
+		Serial.print(lux2);
+		Serial.print(",");
+		Serial.print(vPV);
+		Serial.print(",");
+		Serial.print(iPV);
+		Serial.print(",");
+		Serial.print(vBatt);
+		Serial.print(",");
+		Serial.println(iBatt);
 	}
 	else
 	{
 		Serial.println("Error writing to SD card.");
-		lcd.clear();
-		lcd.print("SD Write Error!");
+		lcd.setCursor(12, 0);
+		lcd.print("SD_WRITE");
 	}
 }
 
@@ -188,7 +221,27 @@ void taskControl()
 
 void loop()
 {
-	scheduleControl.runTask();
-	scheduleLogging.runTask();
-	scheduleSampling.runTask();
+	// Get the current time once at the start of the loop
+	unsigned long currentMillis = millis();
+
+	// --- Task 1: Data Sampling ---
+	if (currentMillis - previousMillisSampling >= intervalSampling)
+	{
+		previousMillisSampling = currentMillis;
+		taskSampling();
+	}
+
+	// --- Task 2: Servo Control ---
+	if (currentMillis - previousMillisControl >= intervalControl)
+	{
+		previousMillisControl = currentMillis;
+		taskControl();
+	}
+
+	// --- Task 3: SD Card Logging ---
+	if (currentMillis - previousMillisLogging >= intervalLogging)
+	{
+		previousMillisLogging = currentMillis;
+		taskLogging();
+	}
 }
